@@ -92,11 +92,11 @@ class RuleSetCreatingShorthandTests < Test::Unit::TestCase
   def test_combining_background_into_shorthand
     properties = {'background-image' => 'url(\'chess.png\')', 'background-color' => 'gray',
       'background-position' => 'center -10.2%', 'background-attachment' => 'fixed',
-      'background-repeat' => 'no-repeat'}
+      'background-repeat' => 'no-repeat', 'background-size' => 'cover'}
 
     combined = create_shorthand(properties)
 
-    assert_equal('gray url(\'chess.png\') no-repeat center -10.2% fixed;', combined['background'])
+    assert_equal('gray url(\'chess.png\') no-repeat center -10.2%/cover fixed;', combined['background'])
 
     # after creating shorthand, all long-hand properties should be deleted
     assert_properties_are_deleted(combined, properties)

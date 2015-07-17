@@ -147,6 +147,15 @@ class RuleSetExpandingShorthandTests < Test::Unit::TestCase
     end
   end
 
+  def test_getting_background_size_from_shorthand
+    ['cover', 'contain', 'inherit'].each do |size|
+      shorthand = "background: url('chess.png') #000fff center center/#{size} no-repeat fixed;"
+      declarations = expand_declarations(shorthand)
+      assert_equal(size, declarations['background-size'])
+      assert_equal('center center', declarations['background-position'])
+    end
+  end
+
   def test_getting_background_colour_from_shorthand
     ['blue', 'lime', 'rgb(10,10,10)', 'rgb (  -10%, 99, 300)', '#ffa0a0', '#03c', 'trAnsparEnt', 'inherit'].each do |colour|
       shorthand = "background:#{colour} url('chess.png') center repeat fixed ;"

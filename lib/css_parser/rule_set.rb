@@ -4,12 +4,12 @@ module CssParser
     RE_ELEMENTS_AND_PSEUDO_ELEMENTS = /((^|[\s\+\>]+)[\w]+|\:(first\-line|first\-letter|before|after))/i
     RE_NON_ID_ATTRIBUTES_AND_PSEUDO_CLASSES = /(\.[\w]+)|(\[[\w]+)|(\:(link|first\-child|lang))/i
 
-    BACKGROUND_PROPERTIES = ['background-color', 'background-image', 'background-repeat', 'background-position', 'background-attachment']
+    BACKGROUND_PROPERTIES = ['background-color', 'background-image', 'background-repeat', ['background-position', 'background-size'], 'background-attachment']
     LIST_STYLE_PROPERTIES = ['list-style-type', 'list-style-position', 'list-style-image']
 
     # Array of selector strings.
     attr_reader   :selectors
-    
+
     # Integer with the specificity to use for this RuleSet.
     attr_accessor   :specificity
 
@@ -55,7 +55,7 @@ module CssParser
         @declarations.delete(property)
         return
       end
-      
+
       value.gsub!(/;\Z/, '')
       is_important = !value.gsub!(CssParser::IMPORTANT_IN_PROPERTY_RX, '').nil?
       property = property.downcase.strip
@@ -140,7 +140,7 @@ module CssParser
       value = @declarations['background'][:value]
 
       if value =~ CssParser::RE_INHERIT
-        BACKGROUND_PROPERTIES.each do |prop|
+        BACKGROUND_PROPERTIES.flatten.each do |prop|
           split_declaration('background', prop, 'inherit')
         end
       end
@@ -149,7 +149,11 @@ module CssParser
       split_declaration('background', 'background-attachment', value.slice!(CssParser::RE_SCROLL_FIXED))
       split_declaration('background', 'background-repeat', value.slice!(CssParser::RE_REPEAT))
       split_declaration('background', 'background-color', value.slice!(CssParser::RE_COLOUR))
-      split_declaration('background', 'background-position', value.slice(CssParser::RE_BACKGROUND_POSITION))
+
+      position_and_size = value.slice(CssParser::RE_BACKGROUND_POSITION_SIZE) || ''
+      position, size    = position_and_size.split('/')
+      split_declaration('background', 'background-position', position)
+      split_declaration('background', 'background-size', size)
 
       @declarations.delete('background')
     end
@@ -166,7 +170,7 @@ module CssParser
         split_declaration(k, "#{k}-color", value.slice!(CssParser::RE_COLOUR))
         split_declaration(k, "#{k}-style", value.slice!(CssParser::RE_BORDER_STYLE))
 
-        @declarations.delete(k)   
+        @declarations.delete(k)
       end
     end
 
@@ -175,16 +179,16 @@ module CssParser
     def expand_dimensions_shorthand! # :nodoc:
       {'margin'       => 'margin-%s',
        'padding'      => 'padding-%s',
-       'border-color' => 'border-%s-color', 
-       'border-style' => 'border-%s-style', 
+       'border-color' => 'border-%s-color',
+       'border-style' => 'border-%s-style',
        'border-width' => 'border-%s-width'}.each do |property, expanded|
 
         next unless @declarations.has_key?(property)
-        
+
         value = @declarations[property][:value]
 
         # RGB and HSL values in borders are the only units that can have spaces (within params).
-        # We cheat a bit here by stripping spaces after commas in RGB and HSL values so that we 
+        # We cheat a bit here by stripping spaces after commas in RGB and HSL values so that we
         # can split easily on spaces.
         #
         # TODO: rgba, hsl, hsla
@@ -311,11 +315,21 @@ module CssParser
     def create_shorthand_properties! properties, shorthand_property # :nodoc:
       values = []
       properties.each do |property|
-         if @declarations.has_key?(property) and not @declarations[property][:is_important]
-          values << @declarations[property][:value]
-           @declarations.delete(property)
-         end
-       end
+        sub_values = []
+
+        # Handle CSS3 special cases like background-position/size
+        [property].flatten.each do |sub_property|
+          next unless @declarations.has_key?(sub_property) and not @declarations[sub_property][:is_important]
+
+          sub_values << @declarations[sub_property][:value]
+
+          @declarations.delete(sub_property)
+        end
+
+        next if sub_values.empty?
+
+        values << sub_values.join('/')
+      end
 
       unless values.empty?
         @declarations[shorthand_property] = {:value => values.join(' ')}
@@ -329,14 +343,14 @@ module CssParser
     def create_background_shorthand! # :nodoc:
       create_shorthand_properties! BACKGROUND_PROPERTIES, 'background'
     end
-    
+
     # Combine border-color, border-style and border-width into border
     # Should be run after create_dimensions_shorthand!
     #
     # TODO: this is extremely similar to create_background_shorthand! and should be combined
     def create_border_shorthand! # :nodoc:
       values = []
-      
+
       ['border-width', 'border-style', 'border-color'].each do |property|
         if @declarations.has_key?(property) and not @declarations[property][:is_important]
           # can't merge if any value contains a space (i.e. has multiple values)
@@ -354,16 +368,16 @@ module CssParser
         @declarations['border'] = {:value => values.join(' ')}
       end
     end
-    
-    # Looks for long format CSS dimensional properties (margin, padding, border-color, border-style and border-width) 
+
+    # Looks for long format CSS dimensional properties (margin, padding, border-color, border-style and border-width)
     # and converts them into shorthand CSS properties.
     def create_dimensions_shorthand! # :nodoc:
       directions = ['top', 'right', 'bottom', 'left']
 
       {'margin'       => 'margin-%s',
        'padding'      => 'padding-%s',
-       'border-color' => 'border-%s-color', 
-       'border-style' => 'border-%s-style', 
+       'border-color' => 'border-%s-color',
+       'border-style' => 'border-%s-style',
        'border-width' => 'border-%s-width'}.each do |property, expanded|
 
         top, right, bottom, left = ['top', 'right', 'bottom', 'left'].map { |side| expanded % side }
@@ -377,7 +391,7 @@ module CssParser
           directions.each { |d| values[d.to_sym] = @declarations[expanded % d][:value].downcase.strip }
 
           if values[:left] == values[:right]
-            if values[:top] == values[:bottom] 
+            if values[:top] == values[:bottom]
               if values[:top] == values[:left] # All four sides are equal
                 new_value = values[:top]
               else # Top and bottom are equal, left and right are equal
@@ -400,8 +414,8 @@ module CssParser
     end
 
 
-    # Looks for long format CSS font properties (e.g. <tt>font-weight</tt>) and 
-    # tries to convert them into a shorthand CSS <tt>font</tt> property.  All 
+    # Looks for long format CSS font properties (e.g. <tt>font-weight</tt>) and
+    # tries to convert them into a shorthand CSS <tt>font</tt> property.  All
     # font properties must be present in order to create a shorthand declaration.
     def create_font_shorthand! # :nodoc:
       ['font-style', 'font-variant', 'font-weight', 'font-size',
@@ -449,17 +463,17 @@ module CssParser
 
       if @declarations.has_key?(dest)
         #puts "dest #{dest} already exists"
-      
+
         if @declarations[dest][:order] > @declarations[src][:order]
-          #puts "skipping #{dest}:#{v} due to order "        
+          #puts "skipping #{dest}:#{v} due to order "
           return
         else
-          @declarations[dest] = {}    
+          @declarations[dest] = {}
         end
       end
-      @declarations[dest] = @declarations[src].merge({:value => v.to_s.strip})    
+      @declarations[dest] = @declarations[src].merge({:value => v.to_s.strip})
     end
-  
+
     def parse_declarations!(block) # :nodoc:
       @declarations = {}
 
